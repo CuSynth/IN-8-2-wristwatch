@@ -1,0 +1,5 @@
+(fp_lib_table
+  (lib (name "IN-8-2")(type "KiCad")(uri "/mnt/CommonFiles/Electronics/KiCad/Libs/Nixie/IN-8-2")(options "")(descr ""))
+  (lib (name "TP4056")(type "KiCad")(uri "/mnt/CommonFiles/Electronics/KiCad/Libs/TP4056")(options "")(descr ""))
+  (lib (name "Buttons_Switches_THT")(type "KiCad")(uri "/mnt/CommonFiles/Electronics/KiCad/Libs/Buttons_Switches_THT.pretty-master")(options "")(descr ""))
+)

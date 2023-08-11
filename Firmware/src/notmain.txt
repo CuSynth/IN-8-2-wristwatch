@@ -1,0 +1,417 @@
+#include <RTClib.h>
+#include <Wire.h>
+#include <LowPower.h>
+#include <GyverButton.h>
+#include <avr/power.h>
+
+// #include <VirtualButton.h>
+
+#include <pins.h>
+
+// RTC_DS3231 rtc;
+// GButton butt1(BTN_PIN);
+
+// int cathodes[10] = {cath0, cath1, cath2,
+//                     cath3, cath4, cath5,
+//                     cath6, cath7, cath8, cath9};
+
+
+// int volts;
+
+enum steps {
+  H_ANTIPOISONING,
+  SHOW_H,
+  M_ANTIPOISONING,
+  SHOW_M,
+  IDLE
+};
+steps step;
+
+
+enum modes {
+  TIME, 
+  VCC,
+  SET_H,
+  SET_M,
+  LOW_BAT
+};
+
+modes mode = TIME;
+
+// bool onPower, hasClick, forced;
+// bool sleep_flag = true;
+bool timed_out = false;
+bool forced = false;
+bool onPower;
+
+
+int flag = 0;
+int pwm_duty = 100;
+
+int8_t hrs = 10, mins = 10, secs;
+
+unsigned long stb_time = 2800;
+unsigned long standby_timer, mode_timer, poisoning_timer;
+
+uint8_t incr0, incr1;
+
+
+
+// void good_night() {
+//   digitalWrite(PWM_PIN, 0);
+//   digitalWrite(anode0, 0);
+//   digitalWrite(anode1, 0);
+//   digitalWrite(LED_H, 0);
+//   digitalWrite(LED_M, 0);
+//   for(uint8_t ctd : cathodes)
+//     digitalWrite(ctd, 0);
+  
+//   volts = 0;
+//   sleep_flag = true;
+//   LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
+// }
+
+
+
+void setNumber(uint8_t num) {
+  if(num > 9)
+    return;
+
+  for(uint8_t i=0; i<10; ++i)
+    digitalWrite(cathodes[i], i==num);
+}
+
+void show(uint8_t digit0, uint8_t digit1){
+    setNumber(digit0);
+    digitalWrite(anode0,HIGH);
+    delayMicroseconds(100);
+    digitalWrite(anode0,LOW);
+    
+    delayMicroseconds(400);
+
+    setNumber(digit1);
+    digitalWrite(anode1,HIGH);
+    delayMicroseconds(100);
+    digitalWrite(anode1,LOW);
+    
+    delayMicroseconds(400);
+}
+
+long readVcc() {
+  #if defined(__AVR_ATmega32U4__) || defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
+    ADMUX = _BV(REFS0) | _BV(MUX4) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
+  #elif defined (__AVR_ATtiny24__) || defined(__AVR_ATtiny44__) || defined(__AVR_ATtiny84__)
+    ADMUX = _BV(MUX5) | _BV(MUX0);
+  #elif defined (__AVR_ATtiny25__) || defined(__AVR_ATtiny45__) || defined(__AVR_ATtiny85__)
+    ADMUX = _BV(MUX3) | _BV(MUX2);
+  #else
+    ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
+  #endif  
+
+  delay(50); 
+  ADCSRA |= _BV(ADSC); 
+  while (bit_is_set(ADCSRA,ADSC)); 
+
+  uint8_t low  = ADCL; 
+  uint8_t high = ADCH; 
+
+  long result = (high<<8) | low;
+
+  result = 1125300L / result; 
+  return result; 
+}
+
+
+// void set_timers() {
+//   standby_timer = millis();
+//   mode_timer = millis();
+//   poisoning_timer = millis();
+// }
+
+// void wake_up() {
+//   set_timers();
+// }
+
+void showTime(){
+  uint8_t digit0, digit1;
+
+  switch (step) {
+  case H_ANTIPOISONING:
+  case M_ANTIPOISONING:
+    if((millis() - poisoning_timer) > 10) {
+      if(++incr0 > 9)
+        incr0 = 0;
+
+      if(++incr1 > 9)
+        incr1 = 0;
+
+      poisoning_timer = millis();
+    }
+
+    digit0 = incr0;
+    digit1 = incr1;
+
+    if ((millis() -  mode_timer) > 200) {
+      if(step == H_ANTIPOISONING) {
+        step = SHOW_H;
+        digitalWrite(LED_H, HIGH);
+      }
+      else {
+        step = SHOW_M;
+        digitalWrite(LED_M, HIGH);
+      }
+
+      mode_timer = millis();
+    }
+    break;
+  
+  case SHOW_H:
+    digit0 = hrs/10;
+    digit1 = hrs%10;
+      
+    if ((millis() -  mode_timer) > 1200) {
+      step = M_ANTIPOISONING;
+      mode_timer = millis();
+      poisoning_timer = millis();
+
+      digitalWrite(LED_H, LOW);
+    }
+    break;
+
+  case SHOW_M:
+    digit0 = mins/10;
+    digit1 = mins%10;
+
+    if ((millis() -  mode_timer) > 1200) {
+      mode_timer = millis();
+      poisoning_timer = millis();
+    }
+    break;
+
+  default:
+    break;
+  }
+
+  if(step != IDLE)
+    show(digit0, digit1);
+
+  if((millis() - standby_timer) > stb_time) {
+    digitalWrite(LED_M, LOW);
+    timed_out = true;
+  }
+}
+  
+
+
+void showVcc() {
+  uint8_t digit0, digit1;
+
+  digit0 = volts/10;
+  digit1 = volts%10;
+  show(digit0, digit1);
+
+  digitalWrite(LED_M, LOW);
+  digitalWrite(LED_H, LOW);
+  
+
+  if (millis() - standby_timer > 1000) {
+    timed_out = true;
+  }
+}
+
+void saveTime() {
+  DateTime now = rtc.now();
+  rtc.adjust(DateTime(now.year(), now.month(), now.day(), hrs, mins, 0));
+}
+
+void changeH(){
+  uint8_t digit0, digit1;
+
+  if (butt1.isRelease())
+    if (++hrs > 23)
+      hrs = 0;
+      
+  digitalWrite(LED_H, HIGH);
+  digitalWrite(LED_M, LOW);
+
+  digit0 = hrs/10;
+  digit1 = hrs%10;
+  show(digit0, digit1);
+
+  if (millis() - standby_timer > 3000) {
+    saveTime();
+    timed_out = true;
+  }
+}
+
+void changeM(){
+  uint8_t digit0, digit1;
+  if (butt1.isRelease())
+    if (++mins > 59)
+      mins = 0;
+
+  digitalWrite(LED_H, LOW);
+  digitalWrite(LED_M, HIGH);
+  
+  digit0 = mins/10;
+  digit1 = mins%10;
+  show(digit0, digit1);
+  
+  if (millis() - standby_timer > 3000) {
+    saveTime();
+    timed_out = true;
+  }
+}
+
+void lowbattery(){
+  digitalWrite(LED_H, HIGH);
+  digitalWrite(LED_M, HIGH);
+  delay(1000);
+  good_night();
+}
+
+void notsetup() {
+  
+  // Wire.begin();
+  
+  // TCCR1B=TCCR1B&0b11111000|0x01; 
+
+  // rtc.begin();
+  // if (rtc.lostPower()) {
+  //   rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  // }
+
+  // DateTime now = rtc.now();
+  // secs = now.second();
+  // mins = now.minute();
+  // hrs = now.hour();
+
+  // butt1.setDebounce(50);        
+  // butt1.setTimeout(500);       
+  // butt1.setClickTimeout(300);  
+  // butt1.setType(LOW_PULL);
+  // butt1.setDirection(NORM_OPEN);
+  // butt1.setTickMode(AUTO);
+  
+  // incr0 = random(0, 9);
+  // incr1 = random(0, 9);
+
+  // attachInterrupt(0, wake_up, RISING);
+  // digitalWrite(PWM_PIN, LOW);
+  // delay(100);
+  // good_night();
+  
+}
+
+
+void notloop(){
+  if (sleep_flag) {  
+    sleep_flag = false;
+    volts = readVcc();
+    volts = map(volts, 3300, 4250, 0, 99);
+    if(volts < 02){mode = LOW_BAT;}
+    if(volts > 90){pwm_duty = 90;}
+    if(volts < 90){pwm_duty = 100;}
+    if(volts < 70){pwm_duty = 110;}
+    if(volts < 50){pwm_duty = 130;}
+    if(volts < 30){pwm_duty = 140;}
+    if(volts < 15){pwm_duty = 160;}
+
+    if(volts > 02){
+      analogWrite(9, pwm_duty);
+      init_vars();
+      delay(100);
+      set_timers();
+    }
+  }
+  
+  timed_out = false;
+  onPower = analogRead(A7) > 10;
+  if(!onPower)
+    forced=false;
+
+  switch (mode) {
+  case TIME:
+    showTime();
+    if(butt1.isDouble())
+      mode = VCC;
+    
+    if(onPower) {
+      if(butt1.isRelease()) {
+        forced = !forced;
+      }
+    } 
+      
+    break;
+  case VCC:
+    showVcc();
+    if(butt1.isDouble())
+      mode = SET_M;
+    break;
+
+  case SET_M:
+    changeM();
+    if(butt1.isHolded()) {
+      digitalWrite(LED_M, LOW);
+      mode = SET_H;
+    }
+    break;
+
+  case SET_H:
+    changeH();
+    if(butt1.isHolded()) {
+      saveTime();
+      digitalWrite(LED_H, LOW);
+      timed_out = true;
+    }
+    break;
+
+  case LOW_BAT:
+    lowbattery();
+    break;
+
+  default:
+    break;
+  }
+
+  if(timed_out) {
+    if(forced) {
+      init_vars();
+      set_timers();
+    }
+    else
+      good_night();
+  }
+}
+ 
+
+
+
+//---------
+// struct pt   cathode_pt;
+// struct pt   anode_pt;
+
+// int vbat;
+
+
+void update_vars();
+void set_timers();
+
+
+
+
+// DateTime now = rtc.now();
+// secs = now.second();
+// mins = now.minute();
+// hrs = now.hour();
+
+// incr0 = random(0, 9);
+// incr1 = random(0, 9);
+
+// void set_timers() {
+// //   standby_timer = millis();
+// //   mode_timer = millis();
+// //   poisoning_timer = millis();
+// }
+
+

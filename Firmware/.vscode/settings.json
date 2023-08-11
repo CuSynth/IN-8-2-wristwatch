@@ -1,0 +1,9 @@
+{
+    "cmake.configureOnOpen": true,
+    "files.associations": {
+        "rtclib.h": "c",
+        "work_logic.h": "c",
+        "arduino.h": "c",
+        "pins.h": "c"
+    }
+}

@@ -11,5 +11,6 @@ void wake_up();
 
 // --------------------------------------------------------
 
-PT_THREAD(LED_indication_machine(struct pt *pt));
+PT_THREAD(      LED_indication_machine(struct pt *pt));
+PT_THREAD(      test_machine(struct pt *pt));
 

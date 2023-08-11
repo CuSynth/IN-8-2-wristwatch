@@ -11,25 +11,31 @@
    
 // --------------------------------------------------------
 
-uint32_t    led_sequencer = 0xFFAA00AAul;
-GButton btn(BTN_PIN);
-RTC_DS3231 rtc;
+GButton     btn(BTN_PIN);
+RTC_DS3231  rtc;
 
 extern bool sleep_flag;
 
+uint32_t    led_sequencer = 0xFFAA00AAul;
+uint8_t     current_anode = 0;
+uint8_t     to_show       = 11;
 struct pt   led_pt;
+struct pt   test_pt;
 
 // --------------------------------------------------------
 
 void PreLoop() {
 
+   // Prepare threads
    PT_INIT(&led_pt);
 
+   // Prepare RTC
    Wire.begin();
    if (rtc.lostPower()) {
       rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
    }
 
+   // Prepare button
    btn.setDebounce(50);        
    btn.setTimeout(500);       
    btn.setClickTimeout(300);  
@@ -40,6 +46,7 @@ void PreLoop() {
 
    delay(100);
 
+   // Prepare pins
    pinMode(LED_M, OUTPUT);
    pinMode(LED_H, OUTPUT);
    pinMode(ANODE_0, OUTPUT);
@@ -47,13 +54,23 @@ void PreLoop() {
    for(uint8_t i = 0; i <GET_COUNT(cathodes); ++i) {
       pinMode(cathodes[i], OUTPUT);
    }
-  
    digitalWrite(PWM_PIN, LOW);
 
-   sleep_flag = true;
+   // Setup 10 bit and 15.6 kHz freq mode for timer 1.
+   TCCR1B = (TCCR1B & 0xF8)|0x01;   
+   
+   // Setup timer 2 for dynamic indication.
+   noInterrupts();
+   TCNT2 = 0;
+   OCR2A = 78;
+   TCCR2A |= (1 << WGM21);
+   TCCR2B |= (1 << CS22) | (1 << CS21) | (1 << CS20);
+   TIMSK2 |= (1 << OCIE2A);
+   interrupts();
 
-   TCCR1B = (TCCR1B & 0xF8)|0x01;   // Setup 10 bit and 15.6 kHz freq mode for timer 1.
-   prepare_to_sleep();              // Zzzz..
+   // Zzzz..
+   sleep_flag = true;
+   prepare_to_sleep();
 }
 
 
@@ -98,18 +115,13 @@ void loop_impl() {
       if(volts < 15){pwm_duty = 160;}
 
       if(volts > 02){
-         // analogWrite(9, pwm_duty);
+         analogWrite(9, pwm_duty);
          delay(100);
       }
-
-      analogWrite(PWM_PIN, 90);
-      digitalWrite(cathodes[0], HIGH);    // Show 00 for test
-      digitalWrite(ANODE_0, HIGH);
-      digitalWrite(ANODE_1, HIGH);
    }
 
-
    LED_indication_machine(&led_pt);
+   test_machine(&test_pt);
 }
 
 // --------------------------------------------------------
@@ -117,7 +129,6 @@ void loop_impl() {
 PT_THREAD(LED_indication_machine(struct pt *pt)){
    static uint32_t timer;
    static uint8_t i;
-   static uint8_t ctr = 0;
 
    PT_BEGIN(pt);
 
@@ -132,3 +143,46 @@ PT_THREAD(LED_indication_machine(struct pt *pt)){
    PT_END(pt);
 }
 
+
+PT_THREAD(test_machine(struct pt *pt)){
+   static uint32_t timer;
+
+   PT_BEGIN(pt);
+
+   while(1){
+
+
+      if(to_show <= 0) {
+         prepare_to_sleep();
+      }
+      --to_show;
+
+      PT_DELAY(pt, timer, 1000);
+      // PT_YIELD(pt);
+   }
+   PT_END(pt);
+}
+
+ISR(TIMER2_COMPA_vect) {
+   // Todo: refactor
+
+   for(uint8_t i = 0; i < GET_COUNT(cathodes); ++i)  {
+      digitalWrite(cathodes[i], LOW);
+   }
+   
+   if(current_anode & 0x1) {
+      digitalWrite(ANODE_1, HIGH);
+      digitalWrite(ANODE_0, LOW);
+
+      digitalWrite(cathodes[to_show%10], HIGH);
+   }
+   else {
+      digitalWrite(ANODE_1, LOW);
+      digitalWrite(ANODE_0, HIGH);
+
+      digitalWrite(cathodes[to_show/10], HIGH);
+   }
+
+   current_anode += 1;
+   current_anode %= 2;
+}

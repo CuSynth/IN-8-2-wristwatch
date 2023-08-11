@@ -15,7 +15,7 @@ void prepare_to_sleep() {
     digitalWrite(LED_M, 0);
 
     for(uint8_t i = 0; i < GET_COUNT(cathodes); ++i)  {
-        digitalWrite(cathodes[i], 0);
+        digitalWrite(cathodes[i], LOW);
     }
   
     sleep_flag = true;

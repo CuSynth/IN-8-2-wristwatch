@@ -1,7 +1,11 @@
+#ifndef __WORK_LOGIC__ 
+#define __WORK_LOGIC__
+
 #include <Arduino.h>
 #include "pt.h"
 
 #define GET_COUNT(arr) (sizeof(arr)/sizeof(arr[0]))
+
 enum modes {
   INIT,
   TIME, 
@@ -26,3 +30,5 @@ PT_THREAD(      time_machine(struct pt *pt));
 
 PT_THREAD(      LED_indication_machine(struct pt *pt));
 PT_THREAD(      indicator_machine(struct pt *pt));
+
+#endif

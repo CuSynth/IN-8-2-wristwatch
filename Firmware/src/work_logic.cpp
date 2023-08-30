@@ -78,14 +78,16 @@ void PreLoop() {
    // Setup 10 bit and 15.6 kHz freq mode for timer 1.
    TCCR1B = (TCCR1B & 0xF8)|0x01;
       
-   // Setup timer 2 for dynamic indication.
-   // noInterrupts();
-   // TCNT2 = 0;
-   // OCR2A = 10;
-   // TCCR2A |= (1 << WGM21);
-   // TCCR2B |= (1 << CS22) | (1 << CS21) | (1 << CS20);
-   // TIMSK2 |= (1 << OCIE2A);
-   // interrupts();
+   // Setup timer 2 for dynamic indication. 
+   // So, ISR will be called every 1ms.
+   noInterrupts();
+   TCCR2B = 0;
+   TCCR2A = 0;
+   OCR2A = 8;
+   TCCR2A |= (1 << WGM21);
+   TCCR2B |= (1 << CS22) | (1 << CS21) | (1 << CS20);
+   TIMSK2 |= (1 << OCIE2A);
+   interrupts();
    
    // Zzzz..
    prepare_to_sleep();
@@ -181,8 +183,11 @@ void loop_impl() {
          break;
 
       case SET_H:
-         LED_indication_machine(&led_pt);
          to_show = 2;
+         
+         if(!PT_SCHEDULE(LED_indication_machine(&led_pt)))
+            prepare_to_sleep();
+         
          break;
          
       case SET_M:
@@ -194,9 +199,6 @@ void loop_impl() {
       default:
          break;
    }
-
-   // if(indication)
-   //    indicator_machine(&indicator_pt);
 
 }
 
@@ -336,71 +338,46 @@ PT_THREAD(LED_indication_machine(struct pt *pt)){
    static uint8_t i;
 
    PT_BEGIN(pt);
+   LED_HR_H();
 
-   while(1){
-      for(i = 0; i < 32; i ++) {
-         digitalWrite(LED_M, (led_sequencer >> i) & 0x01ul);    
-         PT_DELAY(pt, timer, 200);
-      }
-      PT_YIELD(pt);
-      prepare_to_sleep();
-   }
+    for(i = 0; i < 32; i ++) {
+        digitalWrite(LED_M, (led_sequencer >> i) & 0x01ul);    
+        PT_DELAY(pt, timer, 200);
+    }
+    PT_YIELD(pt);
+   
+   LED_HR_L();
    PT_END(pt);
 }
 
-PT_THREAD(indicator_machine(struct pt *pt)){
-   static uint32_t timer;
-      
-   PT_BEGIN(pt);
-   A0_TO_L();
-   A1_TO_L();
-
-   while(1){
-      A0_TO_H();
-      cath_to_state(to_show/10, 1);
-      PT_DELAY(pt, timer, 1);
-
-
-      A0_TO_L(); 
-      ALL_CATH_L();
-      PT_DELAY(pt, timer, 4);
-
-
-      A1_TO_H();
-      cath_to_state(to_show%10, 1);
-      PT_DELAY(pt, timer, 1);
-
-
-      A1_TO_L();
-      ALL_CATH_L();
-      PT_DELAY(pt, timer, 4);
-
-      PT_YIELD(pt);
-   }
-   PT_END(pt);
-}
+// --------------------------------------------------------
 
 ISR(TIMER2_COMPA_vect) {
-   // Todo: refactor
+    static uint8_t  cntr = 0;
+    if(cntr == 10) {
+        cntr = 0;
+    }
 
-   // for(uint8_t i = 0; i < GET_COUNT(cathodes); ++i)  {
-   //    digitalWrite(cathodes[i], LOW);
-   // }
-   
-   // if(current_anode & 0x1) {
-   //    digitalWrite(ANODE_1, HIGH);
-   //    digitalWrite(ANODE_0, LOW);
+    if(cntr == 0 && indication) {
+        A0_TO_H();
+        cath_to_state(to_show/10, 1);
+    }
 
-   //    digitalWrite(cathodes[to_show%10], HIGH);
-   // }
-   // else {
-   //    digitalWrite(ANODE_1, LOW);
-   //    digitalWrite(ANODE_0, HIGH);
+    if(cntr == 1 && indication){
+        A0_TO_L();
+        ALL_CATH_L();
+    }
 
-   //    digitalWrite(cathodes[to_show/10], HIGH);
-   // }
+    if(cntr == 5 && indication) {
+        A1_TO_H();
+        cath_to_state(to_show%10, 1);
+    }
 
-   current_anode += 1;
-   current_anode %= 2;
+    if(cntr == 6 && indication) {
+        A1_TO_L();
+        ALL_CATH_L();
+    }
+
+    cntr++;
 }
 

@@ -22,13 +22,14 @@ extern bool sleep_flag;
 
 modes       mode;
 
-uint32_t    led_sequencer = 0xFFAA00AAul;
-uint8_t     current_anode = 0;
-uint8_t     to_show       = 0;
-uint8_t     hrs, mins     = 0;
-long supply_voltage       = 0;
+uint32_t    led_sequencer   = 0xFFAA00AAul;
+uint8_t     current_anode   = 0;
+uint8_t     to_show         = 0;
+uint8_t     hrs, mins       = 0;
+long        supply_voltage  = 0;
+uint8_t     anim_set        = 0;
 
-uint16_t    init_delay = 50;
+uint16_t    init_delay = 100;
 uint32_t    init_timer = 0;
 bool        indication = false;
 
@@ -37,6 +38,8 @@ bool        animation = true;
 struct pt   led_pt;
 struct pt   time_pt;
 struct pt   vcc_pt;
+struct pt   hr_pt;
+struct pt   min_pt;
 
 
 // --------------------------------------------------------
@@ -47,6 +50,8 @@ void PreLoop() {
     PT_INIT(&led_pt);
     PT_INIT(&time_pt);
     PT_INIT(&vcc_pt);
+    PT_INIT(&hr_pt);
+    PT_INIT(&min_pt);
 
     // Prepare RTC
     Wire.begin();
@@ -56,11 +61,11 @@ void PreLoop() {
 
     // Prepare button
     btn.setDebounce(50);        
-    btn.setTimeout(300);       
+    btn.setTimeout(500);       
     btn.setClickTimeout(300);  
     btn.setType(LOW_PULL);
     btn.setDirection(NORM_OPEN);
-    btn.setTickMode(MANUAL);
+    btn.setTickMode(AUTO);
     attachInterrupt(0, wake_up, RISING);
 
     delay(100);
@@ -147,7 +152,7 @@ void loop_impl() {
         }
     }
 
-    btn.tick();
+    // btn.tick();
 
     switch (mode) {
         case INIT:
@@ -159,6 +164,7 @@ void loop_impl() {
                 mode = TIME;
                 indication = true;
             }
+
 
             break;
 
@@ -178,16 +184,62 @@ void loop_impl() {
             break;
 
         case SET_H:
-            to_show = 2;
-            if(!PT_SCHEDULE(LED_indication_machine(&led_pt)))
-                prepare_to_sleep();
+            LED_indication_machine(&led_pt, 0x01);
+            
+            if(btn.isClick())
+                hrs++;
+            if(hrs >= 24)
+                hrs = 0;
+            
+            to_show = hrs;
+            
+            if(btn.isHolded()) {
+                LED_HR_L();
+                LED_MIN_L();
+                mode = SET_M;
+                delay(100);
+            }
 
             break;
 
         case SET_M:
+            LED_indication_machine(&led_pt, 0x02);
+            
+            if(btn.isClick())
+                mins++;
+            if(mins >= 60)
+                mins = 0;
+
+            to_show = mins;
+
+            if(btn.isHolded()) {
+                LED_HR_L();
+                LED_MIN_L();
+                mode = SET_ANIM;
+            
+                DateTime now = rtc.now();
+                rtc.adjust(DateTime(now.year(), now.month(), now.day(), hrs, mins, 0));
+            
+                delay(100);
+            }
             break;
 
-        case LOW_BAT:
+        case SET_ANIM:
+            LED_HR_H();
+            LED_MIN_H();
+
+            if(btn.isClick())
+                anim_set++;
+            if(anim_set >= 5)
+                anim_set = 0;
+
+            to_show = anim_set;
+
+            if(btn.isHolded()) {
+                LED_HR_L();
+                LED_MIN_L();
+                prepare_to_sleep();
+            }
             break;
 
         default:
@@ -306,20 +358,30 @@ PT_THREAD(time_machine(struct pt *pt)) {
 }
 
 
-PT_THREAD(LED_indication_machine(struct pt *pt)){
+PT_THREAD(LED_indication_machine(struct pt *pt, uint8_t led)){
     static uint32_t timer;
-    static uint8_t i;
 
     PT_BEGIN(pt);
-    LED_HR_H();
 
-    for(i = 0; i < 32; i ++) {
-        digitalWrite(LED_M, (led_sequencer >> i) & 0x01ul);    
-        PT_DELAY(pt, timer, 200);
+    while (1) {
+        if(led & 0x01)
+            LED_HR_H();
+        else 
+            LED_MIN_H();
+
+        PT_DELAY(pt, timer, 400);
+        PT_YIELD(pt);
+
+        if(led & 0x01)
+            LED_HR_L();
+        else 
+            LED_MIN_L();
+
+        PT_DELAY(pt, timer, 400);
+        PT_YIELD(pt);
+
     }
-    PT_YIELD(pt);
 
-    LED_HR_L();
     PT_END(pt);
 }
 

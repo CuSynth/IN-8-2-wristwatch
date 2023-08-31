@@ -12,8 +12,7 @@ enum modes {
   VCC,
   SET_H,
   SET_M,
-  SET_ANIM,
-  LOW_BAT
+  SET_ANIM
 };
 
 // --------------------------------------------------------
@@ -27,6 +26,8 @@ void cath_to_state(uint8_t cath, bool state);
 
 PT_THREAD(      time_machine(struct pt *pt));
 PT_THREAD(      VCC_machine(struct pt *pt, int8_t supply_voltage));
-PT_THREAD(      LED_indication_machine(struct pt *pt));
+PT_THREAD(      LED_indication_machine(struct pt *pt, uint8_t led));
+PT_THREAD(      hr_set_machine(struct pt *pt));
+PT_THREAD(      min_set_machine(struct pt *pt));
 
 #endif

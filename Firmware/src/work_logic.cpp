@@ -26,6 +26,7 @@ uint32_t    led_sequencer = 0xFFAA00AAul;
 uint8_t     current_anode = 0;
 uint8_t     to_show       = 0;
 uint8_t     hrs, mins     = 0;
+long supply_voltage       = 0;
 
 uint16_t    init_delay = 50;
 uint32_t    init_timer = 0;
@@ -34,8 +35,9 @@ bool        indication = false;
 bool        animation = true;
 
 struct pt   led_pt;
-struct pt   indicator_pt;
 struct pt   time_pt;
+struct pt   vcc_pt;
+
 
 // --------------------------------------------------------
 
@@ -44,7 +46,7 @@ void PreLoop() {
     // Prepare threads
     PT_INIT(&led_pt);
     PT_INIT(&time_pt);
-    PT_INIT(&indicator_pt);
+    PT_INIT(&vcc_pt);
 
     // Prepare RTC
     Wire.begin();
@@ -112,22 +114,26 @@ void loop_impl() {
         sleep_flag = false;
         int pwm_duty = 100;
 
-        long volts = readVcc();
-        volts = map(volts, 3300, 4250, 0, 99);
-        if(volts > 90){pwm_duty = 90;}
-        if(volts < 90){pwm_duty = 100;}
-        if(volts < 70){pwm_duty = 110;}
-        if(volts < 50){pwm_duty = 130;}
-        if(volts < 30){pwm_duty = 140;}
-        if(volts < 15){pwm_duty = 160;}
+        supply_voltage = readVcc();
+        supply_voltage = map(supply_voltage, 3300, 4250, 0, 99);
+        if(supply_voltage > 90){pwm_duty = 90;}
+        if(supply_voltage < 90){pwm_duty = 100;}
+        if(supply_voltage < 70){pwm_duty = 110;}
+        if(supply_voltage < 50){pwm_duty = 130;}
+        if(supply_voltage < 30){pwm_duty = 140;}
+        if(supply_voltage < 15){pwm_duty = 160;}
 
-        if(volts > 02){
+        if(supply_voltage > 02){
             analogWrite(9, pwm_duty);
             delay(100);
 
             DateTime now = rtc.now();
             mins = now.minute();
             hrs = now.hour();
+
+            PT_INIT(&led_pt);
+            PT_INIT(&time_pt);
+            PT_INIT(&vcc_pt);
 
             to_show = 0;
             mode = INIT;
@@ -157,17 +163,18 @@ void loop_impl() {
             break;
 
         case TIME:
-            if(!PT_SCHEDULE(time_machine(&time_pt)))
-                prepare_to_sleep();
-
             if(btn.isDouble()) {
                 mode = VCC;
-                to_show = 1;
             }
-
+            
+            if(!PT_SCHEDULE(time_machine(&vcc_pt)))
+                prepare_to_sleep();
             break;
 
         case VCC:
+            if(!PT_SCHEDULE(VCC_machine(&time_pt, supply_voltage))) {
+                prepare_to_sleep();
+            }
             break;
 
         case SET_H:
@@ -313,6 +320,20 @@ PT_THREAD(LED_indication_machine(struct pt *pt)){
     PT_YIELD(pt);
 
     LED_HR_L();
+    PT_END(pt);
+}
+
+PT_THREAD(VCC_machine(struct pt *pt, int8_t supply_voltage)) {
+    static uint32_t timer;
+
+    PT_BEGIN(pt);
+    LED_HR_L();
+    LED_MIN_L();
+
+    to_show = supply_voltage;
+    PT_DELAY(pt, timer, 1000);
+
+    PT_YIELD(pt);
     PT_END(pt);
 }
 

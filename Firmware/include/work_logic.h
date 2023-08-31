@@ -25,10 +25,8 @@ void cath_to_state(uint8_t cath, bool state);
 
 // --------------------------------------------------------
 
-PT_THREAD(      anim_machine(struct pt *pt));
 PT_THREAD(      time_machine(struct pt *pt));
-
+PT_THREAD(      VCC_machine(struct pt *pt, int8_t supply_voltage));
 PT_THREAD(      LED_indication_machine(struct pt *pt));
-PT_THREAD(      indicator_machine(struct pt *pt));
 
 #endif

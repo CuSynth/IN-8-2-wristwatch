@@ -2,10 +2,11 @@
 
 #include <RTClib.h>
 #include <Wire.h>
+#include <EEPROM.h>
+
 // #include <avr/power.h>
 #include <GyverButton.h>
 #include "pt.h"
-
 #include "pins.h"
 #include "sleep_logic.h"
 
@@ -22,7 +23,7 @@ extern bool sleep_flag;
 
 modes       mode;
 
-uint32_t    led_sequencer   = 0xFFAA00AAul;
+// uint32_t    led_sequencer   = 0xFFAA00AAul;
 uint8_t     current_anode   = 0;
 uint8_t     to_show         = 0;
 uint8_t     hrs, mins       = 0;
@@ -33,7 +34,7 @@ uint16_t    init_delay = 100;
 uint32_t    init_timer = 0;
 bool        indication = false;
 
-bool        animation = true;
+// bool        animation = true;
 
 struct pt   led_pt;
 struct pt   time_pt;
@@ -60,9 +61,9 @@ void PreLoop() {
     }
 
     // Prepare button
-    btn.setDebounce(50);        
-    btn.setTimeout(500);       
-    btn.setClickTimeout(300);  
+    btn.setDebounce(BTN_DEBOUNCE);        
+    btn.setTimeout(BTN_TMT);       
+    btn.setClickTimeout(BTN_CL_TMT);  
     btn.setType(LOW_PULL);
     btn.setDirection(NORM_OPEN);
     btn.setTickMode(AUTO);
@@ -136,12 +137,16 @@ void loop_impl() {
             mins = now.minute();
             hrs = now.hour();
 
-            PT_INIT(&led_pt);
             PT_INIT(&time_pt);
             PT_INIT(&vcc_pt);
 
+            PT_INIT(&hr_pt);
+            PT_INIT(&min_pt);
+            PT_INIT(&led_pt);
+
             to_show = 0;
             mode = INIT;
+            anim_set = EEPROM.read(ANIM_SET_ADDR);
             init_timer = millis();
         }
         else {
@@ -230,7 +235,7 @@ void loop_impl() {
 
             if(btn.isClick())
                 anim_set++;
-            if(anim_set >= 5)
+            if(anim_set >= 2)
                 anim_set = 0;
 
             to_show = anim_set;
@@ -239,6 +244,7 @@ void loop_impl() {
                 LED_HR_L();
                 LED_MIN_L();
                 prepare_to_sleep();
+                EEPROM.update(ANIM_SET_ADDR, anim_set);
             }
             break;
 
@@ -339,17 +345,24 @@ void cath_to_state(uint8_t cath, bool state) {
 
 PT_THREAD(time_machine(struct pt *pt)) {
     static uint32_t timer;
+    static struct pt anim_pt;
 
     PT_BEGIN(pt);
+    PT_INIT(&anim_pt);
 
+
+    if(anim_set == 1)
+        PT_WAIT_THREAD(pt, anim_machine(&anim_pt));
     to_show = hrs;
     LED_HR_H();
-    PT_DELAY(pt, timer, 1000);
+    PT_DELAY(pt, timer, HR_HOLD_TIME);
 
+    if(anim_set == 1)
+        PT_WAIT_THREAD(pt, anim_machine(&anim_pt));
     to_show = mins;
     LED_HR_L();
     LED_MIN_H();
-    PT_DELAY(pt, timer, 1000);
+    PT_DELAY(pt, timer, MIN_HOLD_TIME);
 
     LED_MIN_L();
 
@@ -369,7 +382,7 @@ PT_THREAD(LED_indication_machine(struct pt *pt, uint8_t led)){
         else 
             LED_MIN_H();
 
-        PT_DELAY(pt, timer, 400);
+        PT_DELAY(pt, timer, LED_BLINK_DELAY);
         PT_YIELD(pt);
 
         if(led & 0x01)
@@ -377,9 +390,8 @@ PT_THREAD(LED_indication_machine(struct pt *pt, uint8_t led)){
         else 
             LED_MIN_L();
 
-        PT_DELAY(pt, timer, 400);
+        PT_DELAY(pt, timer, LED_BLINK_DELAY);
         PT_YIELD(pt);
-
     }
 
     PT_END(pt);
@@ -393,10 +405,28 @@ PT_THREAD(VCC_machine(struct pt *pt, int8_t supply_voltage)) {
     LED_MIN_L();
 
     to_show = supply_voltage;
-    PT_DELAY(pt, timer, 1000);
+    PT_DELAY(pt, timer, VCC_HOLD_TIME);
 
     PT_YIELD(pt);
     PT_END(pt);
+}
+
+PT_THREAD(anim_machine(struct pt *pt)) {
+    static uint32_t timer;
+    static uint8_t  i;
+    
+    PT_BEGIN(pt);
+    
+    i=0;
+    for(i = 0; i < ANIM_COUNT; ++i) {
+        to_show = rand() % ANIM_MAX_NUM;
+        
+        PT_DELAY(pt, timer, ANIM_DURATION);
+        PT_YIELD(pt);
+    }
+
+    PT_END(pt);
+
 }
 
 // --------------------------------------------------------

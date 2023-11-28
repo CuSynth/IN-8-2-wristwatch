@@ -33,17 +33,23 @@ uint8_t     anim_set        = 0;
 uint16_t    init_delay = 100;
 uint32_t    init_timer = 0;
 bool        indication = false;
-
-// bool        animation = true;
+bool        on_power   = false;
 
 struct pt   led_pt;
 struct pt   time_pt;
+struct pt   pwr_time_pt;
 struct pt   vcc_pt;
 struct pt   hr_pt;
 struct pt   min_pt;
 
 
 // --------------------------------------------------------
+
+static void get_time() {
+    DateTime now = rtc.now();
+    mins = now.minute();
+    hrs = now.hour();
+}
 
 void PreLoop() {
 
@@ -53,6 +59,7 @@ void PreLoop() {
     PT_INIT(&vcc_pt);
     PT_INIT(&hr_pt);
     PT_INIT(&min_pt);
+    PT_INIT(&pwr_time_pt);
 
     // Prepare RTC
     Wire.begin();
@@ -133,11 +140,10 @@ void loop_impl() {
             analogWrite(9, pwm_duty);
             delay(100);
 
-            DateTime now = rtc.now();
-            mins = now.minute();
-            hrs = now.hour();
+            get_time();
 
             PT_INIT(&time_pt);
+            PT_INIT(&pwr_time_pt);
             PT_INIT(&vcc_pt);
 
             PT_INIT(&hr_pt);
@@ -147,6 +153,7 @@ void loop_impl() {
             to_show = 0;
             mode = INIT;
             anim_set = EEPROM.read(ANIM_SET_ADDR);
+            on_power = analogRead(USB_SENS) > 10;
             init_timer = millis();
         }
         else {
@@ -162,14 +169,16 @@ void loop_impl() {
     switch (mode) {
         case INIT:
             if(btn.isHolded()) {
-                mode = SET_H;
+                if(on_power)
+                    mode = PWR_TIME;
+                else               
+                    mode = SET_H;
                 indication = true;
             }
             if(!btn.state() && ((millis() - init_timer) > init_delay)) {
-                mode = TIME;
                 indication = true;
+                mode = TIME;
             }
-
 
             break;
 
@@ -243,10 +252,20 @@ void loop_impl() {
             if(btn.isHolded()) {
                 LED_HR_L();
                 LED_MIN_L();
-                prepare_to_sleep();
                 EEPROM.update(ANIM_SET_ADDR, anim_set);
+                prepare_to_sleep();
             }
             break;
+        case PWR_TIME:
+            if(btn.isHolded()) {
+                LED_HR_L();
+                LED_MIN_L();
+                prepare_to_sleep();
+            }
+
+            onpower_time_machine(&vcc_pt);
+            break;
+
 
         default:
             break;
@@ -367,6 +386,60 @@ PT_THREAD(time_machine(struct pt *pt)) {
     LED_MIN_L();
 
     PT_YIELD(pt);
+    PT_END(pt);
+}
+
+PT_THREAD(onpower_time_machine(struct pt *pt)) {
+    static uint8_t  submode;
+    static uint32_t get_time_timer;
+    static uint32_t minute_timer;
+    static uint8_t  prev_minute;
+
+
+    PT_BEGIN(pt);
+    get_time_timer = millis();
+    submode = 0;
+
+    while (1) {
+        if(btn.isClick()) {
+            submode ++;
+            submode %= 3;
+            prev_minute = mins;
+            delay(200);
+        }
+
+        if((millis() - get_time_timer) > PWR_UPD_TIME_PERIOD) {
+            get_time_timer = millis();
+            get_time();
+        }
+
+        if(submode == 0){
+            to_show = hrs;
+            LED_HR_H();
+            LED_MIN_L();
+        }
+        else if(submode == 1) {
+            to_show = mins;
+            LED_HR_L();
+            LED_MIN_H();
+        }   
+        else {
+            LED_MIN_L();
+            to_show = mins;
+            if(prev_minute != mins) {
+                prev_minute = mins;
+                to_show = hrs;
+                LED_HR_H();
+                PT_DELAY(pt, minute_timer, PWR_MINUTE_SHOW_TIME);
+                LED_HR_L();
+            }
+        
+        }
+
+        PT_YIELD(pt);
+    }
+    
+
     PT_END(pt);
 }
 

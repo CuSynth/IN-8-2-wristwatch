@@ -13,14 +13,17 @@
 
 // --------------------------------------------------------
 
+#define PWR_UPD_TIME_PERIOD  1000
+#define PWR_MINUTE_SHOW_TIME 5000
 
-#define HR_HOLD_TIME    1000
-#define MIN_HOLD_TIME   1000
+
+#define HR_HOLD_TIME    1500
+#define MIN_HOLD_TIME   1500
 #define VCC_HOLD_TIME   1000
 
 #define ANIM_MAX_NUM    100
-#define ANIM_DURATION   20
-#define ANIM_COUNT      5
+#define ANIM_DURATION   15
+#define ANIM_COUNT      12
 
 #define LED_BLINK_DELAY 400
 
@@ -30,6 +33,7 @@
 enum modes {
   INIT,
   TIME, 
+  PWR_TIME,
   VCC,
   SET_H,
   SET_M,
@@ -45,6 +49,7 @@ void cath_to_state(uint8_t cath, bool state);
 
 // --------------------------------------------------------
 
+PT_THREAD(      onpower_time_machine(struct pt *pt));
 PT_THREAD(      time_machine(struct pt *pt));
 PT_THREAD(      VCC_machine(struct pt *pt, int8_t supply_voltage));
 
